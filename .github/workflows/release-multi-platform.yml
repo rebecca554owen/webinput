@@ -1,0 +1,185 @@
+name: Release Multi-Platform Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号 (必须以v开头，例如: v1.0.0, v2.1.3, v1.0.0-beta, v3.2.1-rc1)'
+        required: true
+        default: 'v1.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and Release
+    strategy:
+      # 一个平台构建失败不影响其他平台
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows/amd64
+            artifact_name: webinput.exe
+            asset_name: webinput-windows-amd64.exe
+          - os: macos-latest
+            platform: darwin/amd64
+            artifact_name: webinput.app
+            asset_name: webinput-darwin-amd64.zip
+          - os: macos-latest
+            platform: darwin/arm64
+            artifact_name: webinput.app
+            asset_name: webinput-darwin-arm64.zip
+          - os: ubuntu-latest
+            platform: linux/amd64
+            artifact_name: webinput
+            asset_name: webinput-linux-amd64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '25'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev \
+            build-essential \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+          # 创建 webkit2gtk-4.0 的 pkg-config 兼容链接
+          sudo ln -sf /usr/lib/x86_64-linux-gnu/pkgconfig/webkit2gtk-4.1.pc /usr/lib/x86_64-linux-gnu/pkgconfig/webkit2gtk-4.0.pc
+          sudo ln -sf /usr/lib/x86_64-linux-gnu/pkgconfig/webkit2gtk-web-extension-4.1.pc /usr/lib/x86_64-linux-gnu/pkgconfig/webkit2gtk-web-extension-4.0.pc
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Update version in wails.json (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          $version = "${{ github.event.inputs.version }}" -replace "^v", ""
+          (Get-Content wails.json) -replace '"productVersion":\s*"[^"]*"', "`"productVersion`": `"$version`"" | Set-Content wails.json
+
+      - name: Update version in wails.json (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          VERSION="${VERSION#v}"
+          sed -i '' "s/\"productVersion\":\s*\"[^\"]*\"/\"productVersion\": \"$VERSION\"/" wails.json
+
+      - name: Update version in wails.json (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          VERSION="${VERSION#v}"
+          sed -i "s/\"productVersion\":\s*\"[^\"]*\"/\"productVersion\": \"$VERSION\"/" wails.json
+
+      - name: Build Wails application (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          $env:VITE_VERSION="${{ github.event.inputs.version }}"
+          wails build -platform ${{ matrix.platform }} -clean
+
+      - name: Build Wails application (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          export VITE_VERSION="${{ github.event.inputs.version }}"
+          wails build -platform ${{ matrix.platform }} -clean
+
+      - name: Build Wails application (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          export VITE_VERSION="${{ github.event.inputs.version }}"
+          wails build -platform ${{ matrix.platform }} -clean
+
+      - name: Move build artifact to root (Windows)
+        if: runner.os == 'Windows'
+        run: Copy-Item build/bin/webinput.exe -Destination ${{ matrix.asset_name }}
+
+      - name: Move build artifact to root (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          # 复制 .app 包并压缩成 .zip
+          cp -R build/bin/webinput.app webinput.app
+          zip -r "${{ matrix.asset_name }}" webinput.app
+
+      - name: Move build artifact to root (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          chmod +x build/bin/webinput
+          cp build/bin/webinput "${{ matrix.asset_name }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: ${{ matrix.asset_name }}
+          if-no-files-found: warn
+
+  create-release:
+    name: Create GitHub Release
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Get build time (UTC+8)
+        id: time
+        run: |
+          time=$(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S (UTC+8)')
+          echo "build_time=$time" >> $GITHUB_OUTPUT
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.version }}
+          name: Release ${{ github.event.inputs.version }}
+          body: |
+            ## 🚀 Release ${{ github.event.inputs.version }}
+
+            **下载链接**:
+
+            | 平台 | 架构 | 下载链接 |
+            |------|------|----------|
+            | Windows | amd64 | [webinput-windows-amd64.exe](https://github.com/${{ github.repository }}/releases/download/${{ github.event.inputs.version }}/webinput-windows-amd64.exe) |
+            | macOS | amd64 (Intel) | [webinput-darwin-amd64.zip](https://github.com/${{ github.repository }}/releases/download/${{ github.event.inputs.version }}/webinput-darwin-amd64.zip) |
+            | macOS | arm64 (Apple Silicon) | [webinput-darwin-arm64.zip](https://github.com/${{ github.repository }}/releases/download/${{ github.event.inputs.version }}/webinput-darwin-arm64.zip) |
+            | Linux | amd64 | [webinput-linux-amd64](https://github.com/${{ github.repository }}/releases/download/${{ github.event.inputs.version }}/webinput-linux-amd64) |
+
+            **使用说明**:
+            - **Windows**: 下载 `webinput-windows-amd64.exe`，双击运行
+            - **macOS**: 下载对应架构的 `.zip` 文件，解压后双击打开或拖拽到 Applications 文件夹
+            - **Linux**: 下载 `webinput-linux-amd64`，在终端运行 `chmod +x webinput-linux-amd64` 后执行
+
+            *构建时间: ${{ steps.time.outputs.build_time }}*
+            *提交: [${{ github.sha }}](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }})*
+          draft: false
+          prerelease: ${{ contains(github.event.inputs.version, 'beta') || contains(github.event.inputs.version, 'rc') || contains(github.event.inputs.version, 'alpha') || contains(github.event.inputs.version, 'dev') || contains(github.event.inputs.version, 'test') }}
+          files: ./artifacts/*/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
