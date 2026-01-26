@@ -21,8 +21,8 @@ func main() {
 	// 创建 Wails 应用
 	err := wails.Run(&options.App{
 		Title:  "WebInput",
-		Width:  720,
-		Height: 1080,
+		Width:  540,
+		Height: 960,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
