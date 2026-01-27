@@ -1,38 +1,47 @@
+//go:build darwin
 // +build darwin
 
 package virtualkeyboard
 
-import (
-	"time"
+/*
+#cgo LDFLAGS: -framework CoreGraphics
 
-	"github.com/micmonay/keybd_event"
-)
+#include <ApplicationServices/ApplicationServices.h>
 
-// SendCtrlV macOS 特定实现：发送 Cmd+V 组合键
-// macOS 上使用 Command 键而不是 Ctrl 键进行粘贴
+void sendPaste() {
+    CGEventSourceRef source = CGEventSourceCreate(kCGEventSourceStateHIDSystemState);
+
+    CGEventRef cmdDown = CGEventCreateKeyboardEvent(source, 55, true);
+    CGEventSetFlags(cmdDown, kCGEventFlagMaskCommand);
+    CGEventPost(kCGSessionEventTap, cmdDown);
+
+    CGEventRef vDown = CGEventCreateKeyboardEvent(source, 9, true);
+    CGEventSetFlags(vDown, kCGEventFlagMaskCommand);
+    CGEventPost(kCGSessionEventTap, vDown);
+
+    CGEventRef vUp = CGEventCreateKeyboardEvent(source, 9, false);
+    CGEventPost(kCGSessionEventTap, vUp);
+
+    CGEventRef cmdUp = CGEventCreateKeyboardEvent(source, 55, false);
+    CGEventPost(kCGSessionEventTap, cmdUp);
+
+    CFRelease(cmdDown);
+    CFRelease(vDown);
+    CFRelease(vUp);
+    CFRelease(cmdUp);
+    CFRelease(source);
+}
+*/
+import "C"
+
+import "time"
+
 func SendCtrlV() error {
-	kb, err := keybd_event.NewKeyBonding()
-	if err != nil {
-		return err
-	}
-
-	kb.SetKeys(keybd_event.VK_V)
-	kb.HasSuper(true) // Command 键在 keybd_event 中使用 Super 标志
-
-	if err := kb.Press(); err != nil {
-		return err
-	}
-
+	C.sendPaste()
 	time.Sleep(20 * time.Millisecond)
-
-	if err := kb.Release(); err != nil {
-		return err
-	}
-
 	return nil
 }
 
-// SendCmdV SendCtrlV 的别名，保持 API 一致性
-func SendCmdV() error {
+func SendShiftInsert() error {
 	return SendCtrlV()
 }

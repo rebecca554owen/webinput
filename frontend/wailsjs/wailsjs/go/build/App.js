@@ -22,6 +22,10 @@ export function GetSelectedIP() {
   return window['go']['build']['App']['GetSelectedIP']();
 }
 
+export function Hide() {
+  return window['go']['build']['App']['Hide']();
+}
+
 export function IsRunning() {
   return window['go']['build']['App']['IsRunning']();
 }
@@ -30,12 +34,20 @@ export function OpenBrowser(arg1) {
   return window['go']['build']['App']['OpenBrowser'](arg1);
 }
 
+export function Quit() {
+  return window['go']['build']['App']['Quit']();
+}
+
 export function SetPort(arg1) {
   return window['go']['build']['App']['SetPort'](arg1);
 }
 
 export function SetSelectedIP(arg1) {
   return window['go']['build']['App']['SetSelectedIP'](arg1);
+}
+
+export function Show() {
+  return window['go']['build']['App']['Show']();
 }
 
 export function StartServer() {

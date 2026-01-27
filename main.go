@@ -30,8 +30,10 @@ func main() {
 		OnStartup:        app.OnStartup,
 		OnShutdown:       app.OnShutdown,
 		OnDomReady:       app.OnDomReady,
-		OnBeforeClose:    func(ctx context.Context) (prevent bool) {
-			return false
+		OnBeforeClose: func(ctx context.Context) (prevent bool) {
+			// 点击关闭按钮时隐藏到托盘，而不是退出
+			app.Hide()
+			return true
 		},
 		Bind: []interface{}{
 			app,
@@ -42,6 +44,10 @@ func main() {
 				TitlebarAppearsTransparent: true,
 				HideTitle:                  false,
 				HideTitleBar:               false,
+			},
+			About: &mac.AboutInfo{
+				Title:   "WebInput",
+				Message: "通过手机浏览器远程输入到电脑",
 			},
 		},
 	})

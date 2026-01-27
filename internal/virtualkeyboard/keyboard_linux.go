@@ -1,56 +1,72 @@
+//go:build linux
 // +build linux
 
 package virtualkeyboard
 
+/*
+#cgo LDFLAGS: -lX11 -lXtst
+
+#include <X11/Xlib.h>
+#include <X11/keysym.h>
+#include <X11/extensions/XTest.h>
+
+Display *display = NULL;
+
+void initDisplay() {
+    if (display == NULL) {
+        display = XOpenDisplay(NULL);
+    }
+}
+
+void closeDisplay() {
+    if (display != NULL) {
+        XCloseDisplay(display);
+        display = NULL;
+    }
+}
+
+void sendCtrlV() {
+    initDisplay();
+    if (display == NULL) return;
+
+    KeyCode ctrl = XKeysymToKeycode(display, XK_Control_L);
+    KeyCode v = XKeysymToKeycode(display, XK_v);
+
+    XTestFakeKeyEvent(display, ctrl, True, CurrentTime);
+    XTestFakeKeyEvent(display, v, True, CurrentTime);
+    XTestFakeKeyEvent(display, v, False, CurrentTime);
+    XTestFakeKeyEvent(display, ctrl, False, CurrentTime);
+    XFlush(display);
+}
+
+void sendShiftInsert() {
+    initDisplay();
+    if (display == NULL) return;
+
+    KeyCode shift = XKeysymToKeycode(display, XK_Shift_L);
+    KeyCode insert = XKeysymToKeycode(display, XK_Insert);
+
+    XTestFakeKeyEvent(display, shift, True, CurrentTime);
+    XTestFakeKeyEvent(display, insert, True, CurrentTime);
+    XTestFakeKeyEvent(display, insert, False, CurrentTime);
+    XTestFakeKeyEvent(display, shift, False, CurrentTime);
+    XFlush(display);
+}
+*/
+import "C"
+
 import (
 	"time"
-
-	"github.com/micmonay/keybd_event"
 )
 
-// SendCtrlV 发送 Ctrl+V 组合键（Linux 粘贴方式）
 func SendCtrlV() error {
-	kb, err := keybd_event.NewKeyBonding()
-	if err != nil {
-		return err
-	}
-
-	kb.SetKeys(keybd_event.VK_V)
-	kb.HasCTRL(true)
-
-	if err := kb.Press(); err != nil {
-		return err
-	}
-
+	C.sendCtrlV()
 	time.Sleep(20 * time.Millisecond)
-
-	if err := kb.Release(); err != nil {
-		return err
-	}
-
 	return nil
 }
 
-// SendShiftInsert 发送 Shift+Insert 组合键（Linux 粘贴方式）
-// 用于终端等不支持 Ctrl+V 的场景
 func SendShiftInsert() error {
-	kb, err := keybd_event.NewKeyBonding()
-	if err != nil {
-		return err
-	}
-
-	kb.SetKeys(keybd_event.VK_INSERT)
-	kb.HasSHIFT(true)
-
-	if err := kb.Press(); err != nil {
-		return err
-	}
-
+	C.sendShiftInsert()
 	time.Sleep(20 * time.Millisecond)
-
-	if err := kb.Release(); err != nil {
-		return err
-	}
-
 	return nil
 }

@@ -11,13 +11,19 @@ export function GetPort():Promise<string>;
 
 export function GetSelectedIP():Promise<string>;
 
+export function Hide():Promise<void>;
+
 export function IsRunning():Promise<boolean>;
 
 export function OpenBrowser(arg1:string):Promise<void>;
 
+export function Quit():Promise<void>;
+
 export function SetPort(arg1:string):Promise<void>;
 
 export function SetSelectedIP(arg1:string):Promise<void>;
+
+export function Show():Promise<void>;
 
 export function StartServer():Promise<void>;
 

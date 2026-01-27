@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 
 	"github.com/rebecca554owen/webinput/internal/config"
 	"github.com/rebecca554owen/webinput/internal/logger"
 	"github.com/rebecca554owen/webinput/internal/server"
+	"github.com/getlantern/systray"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -21,6 +23,7 @@ type App struct {
 	mainIP        string
 	accessURL     string
 	isRunning     bool
+	quitChan     chan struct{}
 }
 
 // NewApp 创建新的应用实例
@@ -29,6 +32,7 @@ func NewApp() *App {
 	return &App{
 		config:    &cfg,
 		isRunning: false,
+		quitChan:  make(chan struct{}),
 	}
 }
 
@@ -51,12 +55,17 @@ func (a *App) OnStartup(ctx context.Context) {
 	if err := a.StartServer(); err != nil {
 		logger.Error("自动启动服务器失败: " + err.Error())
 	}
+
+	// 启动系统托盘
+	a.runSystray()
 }
 
 // OnShutdown Wails 应用关闭时调用
 func (a *App) OnShutdown(ctx context.Context) {
 	logger.Info("WebInput 应用关闭")
 	a.StopServer()
+	systray.Quit()
+	close(a.quitChan)
 }
 
 // OnDomReady DOM 准备好后调用
@@ -325,4 +334,65 @@ func (a *App) IsRunning() bool {
 // OpenBrowser 打开浏览器
 func (a *App) OpenBrowser(url string) {
 	runtime.BrowserOpenURL(a.ctx, url)
+}
+
+// Show 显示窗口（从托盘恢复）
+func (a *App) Show() {
+	runtime.WindowShow(a.ctx)
+}
+
+// Hide 隐藏窗口到托盘
+func (a *App) Hide() {
+	runtime.WindowHide(a.ctx)
+}
+
+// Quit 退出应用
+func (a *App) Quit() {
+	runtime.Quit(a.ctx)
+}
+
+// runSystray 运行系统托盘
+func (a *App) runSystray() {
+	// 在独立 goroutine 中运行 systray，避免阻塞 Wails 启动
+	go func() {
+		systray.Run(func() {
+			// 设置托盘图标（使用内置图标）
+			systray.SetIcon(a.getIcon())
+			systray.SetTitle("WebInput")
+			systray.SetTooltip("WebInput - 手机远程输入")
+
+			// 显示/隐藏菜单项
+			showHide := systray.AddMenuItem("显示", "显示窗口")
+			go func() {
+				for range showHide.ClickedCh {
+					a.Show()
+				}
+			}()
+
+			systray.AddSeparator()
+
+			// 退出菜单项
+			quit := systray.AddMenuItem("退出", "退出应用")
+			go func() {
+				for range quit.ClickedCh {
+					logger.Info("用户通过托盘菜单退出应用")
+					// 停止服务器
+					a.StopServer()
+					// 退出 systray（会触发 onExit 回调）
+					systray.Quit()
+					// 使用 os.Exit 确保进程终止
+					os.Exit(0)
+				}
+			}()
+		}, func() {
+			// systray 清理函数
+			logger.Info("Systray 清理函数执行")
+			a.StopServer()
+		})
+	}()
+}
+
+// getIcon 获取托盘图标
+func (a *App) getIcon() []byte {
+	return trayIcon
 }

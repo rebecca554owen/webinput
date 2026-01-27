@@ -1,56 +1,70 @@
+//go:build windows
 // +build windows
 
 package virtualkeyboard
 
 import (
 	"time"
+	"unsafe"
 
-	"github.com/micmonay/keybd_event"
+	"golang.org/x/sys/windows"
 )
 
-// SendCtrlV 发送 Ctrl+V 组合键（Windows 粘贴方式）
+var (
+	user32           = windows.NewLazySystemDLL("user32.dll")
+	procSendInput    = user32.NewProc("SendInput")
+	vkControl uint16 = 0x11
+	vkV       uint16 = 0x56
+	vkShift   uint16 = 0x10
+	vkInsert  uint16 = 0x2D
+	inputKeyboard    = uint32(1)
+	keyEventfKeyUp   = uint32(0x0002)
+	keyEventfKeydown = uint32(0x0000)
+)
+
+type KEYBDINPUT struct {
+	WVk         uint16
+	WScan       uint16
+	DwFlags     uint32
+	Time        uint32
+	DwExtraInfo uintptr
+}
+
+type INPUT struct {
+	Type uint32
+	Ki   KEYBDINPUT
+	_    [8]byte
+}
+
+func sendInput(inputs []INPUT) uint32 {
+	success, _, _ := procSendInput.Call(
+		uintptr(len(inputs)),
+		uintptr(unsafe.Pointer(&inputs[0])),
+		unsafe.Sizeof(inputs[0]),
+	)
+	return uint32(success)
+}
+
 func SendCtrlV() error {
-	kb, err := keybd_event.NewKeyBonding()
-	if err != nil {
-		return err
+	inputs := []INPUT{
+		{Type: inputKeyboard, Ki: KEYBDINPUT{WVk: vkControl, DwFlags: keyEventfKeydown}},
+		{Type: inputKeyboard, Ki: KEYBDINPUT{WVk: vkV, DwFlags: keyEventfKeydown}},
+		{Type: inputKeyboard, Ki: KEYBDINPUT{WVk: vkV, DwFlags: keyEventfKeyUp}},
+		{Type: inputKeyboard, Ki: KEYBDINPUT{WVk: vkControl, DwFlags: keyEventfKeyUp}},
 	}
-
-	kb.SetKeys(keybd_event.VK_V)
-	kb.HasCTRL(true)
-
-	if err := kb.Press(); err != nil {
-		return err
-	}
-
+	sendInput(inputs)
 	time.Sleep(20 * time.Millisecond)
-
-	if err := kb.Release(); err != nil {
-		return err
-	}
-
 	return nil
 }
 
-// SendShiftInsert 发送 Shift+Insert 组合键（Windows 粘贴方式）
-// 用于终端等不支持 Ctrl+V 的场景
 func SendShiftInsert() error {
-	kb, err := keybd_event.NewKeyBonding()
-	if err != nil {
-		return err
+	inputs := []INPUT{
+		{Type: inputKeyboard, Ki: KEYBDINPUT{WVk: vkShift, DwFlags: keyEventfKeydown}},
+		{Type: inputKeyboard, Ki: KEYBDINPUT{WVk: vkInsert, DwFlags: keyEventfKeydown}},
+		{Type: inputKeyboard, Ki: KEYBDINPUT{WVk: vkInsert, DwFlags: keyEventfKeyUp}},
+		{Type: inputKeyboard, Ki: KEYBDINPUT{WVk: vkShift, DwFlags: keyEventfKeyUp}},
 	}
-
-	kb.SetKeys(keybd_event.VK_INSERT)
-	kb.HasSHIFT(true)
-
-	if err := kb.Press(); err != nil {
-		return err
-	}
-
+	sendInput(inputs)
 	time.Sleep(20 * time.Millisecond)
-
-	if err := kb.Release(); err != nil {
-		return err
-	}
-
 	return nil
 }
