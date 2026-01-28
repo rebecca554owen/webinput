@@ -1,0 +1,25 @@
+{
+  "name": "webinput",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && npm run copy-files",
+    "copy-files": "cp main.js dist/main.js",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-opener": "^2"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "vite": "^6.0.3",
+    "typescript": "~5.6.2",
+    "qrcodejs2": "^0.0.2"
+  }
+}

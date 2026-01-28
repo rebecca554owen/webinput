@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebInput</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: #f0f2f5;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            padding-top: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 20px rgba(0, 0, 0, 0.08);
+            padding: 40px;
+            width: 100%;
+            max-width: 600px;
+            min-height: 90vh;
+        }
+
+        h1 {
+            text-align: center;
+            color: #1a1a1a;
+            margin-bottom: 25px;
+            font-size: 26px;
+            font-weight: 600;
+        }
+
+        .status {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            padding: 12px;
+            background: #f7f8fa;
+            border-radius: 8px;
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #ccc;
+        }
+
+        .status-dot.running {
+            background: #34C759;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .form-group {
+            margin-bottom: 18px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #374151;
+            font-weight: 500;
+            font-size: 14px;
+        }
+
+        select, input {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.2s;
+        }
+
+        select:focus, input:focus {
+            outline: none;
+            border-color: #3b82f6;
+        }
+
+        .buttons {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        button {
+            flex: 1;
+            padding: 12px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: #3b82f6;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #2563eb;
+        }
+
+        .btn-secondary {
+            background: #e5e7eb;
+            color: #374151;
+        }
+
+        .btn-secondary:hover {
+            background: #d1d5db;
+        }
+
+        .btn-danger {
+            background: #ef4444;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #dc2626;
+        }
+
+        .qrcode-container {
+            text-align: center;
+            margin: 20px 0;
+            padding: 20px;
+            background: #f9fafb;
+            border-radius: 8px;
+            min-height: 280px;
+            visibility: hidden;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .qrcode-container.visible {
+            visibility: visible;
+            opacity: 1;
+        }
+
+        #qrcode {
+            display: inline-block;
+        }
+
+        .access-url {
+            margin-top: 15px;
+            padding: 10px;
+            background: white;
+            border-radius: 6px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 12px;
+            word-break: break-all;
+            color: #4b5563;
+            cursor: pointer;
+            user-select: all;
+        }
+
+        .access-url:hover {
+            background: #f3f4f6;
+        }
+
+        .history {
+            margin-top: 20px;
+            max-height: 220px;
+            overflow-y: auto;
+        }
+
+        .history-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .history h3 {
+            font-size: 15px;
+            margin: 0;
+            color: #374151;
+            font-weight: 600;
+        }
+
+        .clear-btn {
+            color: #3b82f6;
+            cursor: pointer;
+            font-size: 13px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            transition: background 0.2s;
+        }
+
+        .clear-btn:hover {
+            background: #eff6ff;
+        }
+
+        .history-list {
+            list-style: none;
+        }
+
+        .history-item {
+            padding: 10px 12px;
+            background: #f9fafb;
+            border-radius: 6px;
+            margin-bottom: 6px;
+            font-size: 13px;
+            color: #4b5563;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .history-item .text {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            margin-right: 10px;
+        }
+
+        .history-item .device {
+            font-size: 11px;
+            color: #3b82f6;
+            flex-shrink: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>WebInput</h1>
+        <p style="text-align: center; color: #6b7280; font-size: 12px; margin-top: -15px; margin-bottom: 20px;">
+            版本 <span id="appVersion">1.0.0</span>
+        </p>
+
+        <div class="status">
+            <div class="status-indicator">
+                <div id="statusDot" class="status-dot"></div>
+                <span id="statusText">未启动</span>
+            </div>
+            <span id="ipDisplay">-</span>
+        </div>
+
+        <div class="form-group">
+            <label>选择 IP 地址</label>
+            <select id="ipSelect"></select>
+        </div>
+
+        <div class="form-group">
+            <label>端口</label>
+            <input type="text" id="portInput" value="5000">
+        </div>
+
+        <div class="buttons">
+            <button id="startBtn" class="btn-primary">启动服务</button>
+            <button id="stopBtn" class="btn-secondary">停止服务</button>
+        </div>
+
+        <div class="qrcode-container">
+            <div id="qrcode"></div>
+            <div id="accessUrl" class="access-url" style="display:none;"></div>
+        </div>
+
+        <div class="history">
+            <div class="history-header">
+                <h3>最近接收记录 (最多20条)</h3>
+                <span class="clear-btn" id="clearHistoryBtn">清空</span>
+            </div>
+            <ul id="historyList" class="history-list"></ul>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+    <script src="main.js"></script>
+</body>
+</html>
