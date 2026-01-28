@@ -30,6 +30,10 @@ pub fn run() {
             commands::stop_server,
             commands::get_access_url,
             commands::is_running,
+            commands::get_auto_paste,
+            commands::set_auto_paste,
+            commands::get_auto_enter,
+            commands::set_auto_enter,
         ])
         .setup(|app| {
             let show_item = MenuItem::with_id(app, "show", "显示", true, None::<&str>)?;

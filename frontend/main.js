@@ -1,9 +1,7 @@
+import { invoke } from '@tauri-apps/api/core';
+
 const sentHistory = [];
 const receivedHistory = [];
-
-async function getInvoke() {
-    return window.__TAURI__.core.invoke;
-}
 
 class DesktopWebSocket {
     constructor() {
@@ -13,6 +11,10 @@ class DesktopWebSocket {
     }
 
     async connect(accessURL) {
+        if (!isServerRunning) {
+            return;
+        }
+
         const wsProtocol = accessURL.startsWith('https') ? 'wss:' : 'ws:';
         const wsURL = `${wsProtocol}//${new URL(accessURL).host}/ws?type=desktop`;
 
@@ -20,6 +22,10 @@ class DesktopWebSocket {
             this.ws = new WebSocket(wsURL);
 
             this.ws.onopen = () => {
+                if (!isServerRunning) {
+                    this.ws.close();
+                    return;
+                }
                 this.updateConnectionStatus(true);
                 this.send({
                     type: 'connect',
@@ -32,9 +38,13 @@ class DesktopWebSocket {
                 this.handleMessage(msg);
             };
 
-            this.ws.onclose = () => {
+            this.ws.onclose = async () => {
                 this.updateConnectionStatus(false);
-                this.scheduleReconnect(accessURL);
+                const running = await invoke('is_running');
+                if (running !== isServerRunning) {
+                    isServerRunning = running;
+                    updateButtonStates();
+                }
             };
 
             this.ws.onerror = () => {};
@@ -61,6 +71,10 @@ class DesktopWebSocket {
                 const clientIP = msg.data.client_ip || '';
                 const displayName = clientIP ? `${deviceName} (${clientIP})` : deviceName;
                 addReceivedHistory(msg.data.text, displayName);
+
+                if (autoPasteEnabled) {
+                    this.pasteToDevice(msg.data.text);
+                }
             }
             break;
         case 'clear':
@@ -69,6 +83,17 @@ class DesktopWebSocket {
             }
             break;
         }
+    }
+
+    async pasteToDevice(text) {
+        if (!text) return;
+        this.send({
+            type: 'send',
+            data: {
+                text: text,
+                append_enter: autoEnterEnabled
+            }
+        });
     }
 
     showPreview(data) {
@@ -198,6 +223,16 @@ class DesktopWebSocket {
             }, 1000);
 
             addReceivedHistory(text, device.deviceDisplayName || '未知设备');
+
+            if (autoPasteEnabled) {
+                this.send({
+                    type: 'send',
+                    data: {
+                        text: text,
+                        append_enter: autoEnterEnabled
+                    }
+                });
+            }
         } catch {}
     }
 
@@ -223,26 +258,25 @@ class DesktopWebSocket {
     }
 
     updateConnectionStatus(connected) {
+        if (!isServerRunning) {
+            return;
+        }
         const statusDot = document.getElementById('statusDot');
         const statusText = document.getElementById('statusText');
 
         if (connected) {
-            statusDot.style.background = '#34C759';
-            statusText.textContent = '实时预览已连接';
+            statusDot.classList.add('running');
+            statusDot.style.background = '';
+            statusText.textContent = '运行中';
         } else {
+            statusDot.classList.add('running');
             statusDot.style.background = '#ff9500';
-            statusText.textContent = '实时预览连接中...';
+            statusText.textContent = '实时预览失败';
         }
     }
 
-    scheduleReconnect(accessURL) {
-        if (this.reconnectTimer) {
-            clearTimeout(this.reconnectTimer);
-        }
-
-        this.reconnectTimer = setTimeout(() => {
-            this.connect(accessURL);
-        }, 3000);
+    scheduleReconnect() {
+    // 不再使用重连逻辑，用户可以手动重新启动服务
     }
 
     disconnect() {
@@ -259,6 +293,8 @@ const desktopWS = new DesktopWebSocket();
 
 let selectedIP = '';
 let isServerRunning = false;
+let autoPasteEnabled = true;
+let autoEnterEnabled = false;
 
 window.addEventListener('DOMContentLoaded', () => {
     const versionEl = document.getElementById('appVersion');
@@ -279,8 +315,6 @@ window.addEventListener('DOMContentLoaded', () => {
 
 async function initApp() {
     try {
-        const invoke = await getInvoke();
-
         const ips = await invoke('get_ips');
         const mainIP = await invoke('get_main_ip');
 
@@ -295,12 +329,71 @@ async function initApp() {
 
         isServerRunning = await invoke('is_running');
 
+        const autoPaste = document.getElementById('autoPaste');
+        const autoEnter = document.getElementById('autoEnter');
+
+        const savedAutoPaste = await invoke('get_auto_paste').catch(() => true);
+        const savedAutoEnter = await invoke('get_auto_enter').catch(() => false);
+
+        autoPaste.checked = savedAutoPaste;
+        autoEnter.checked = savedAutoEnter;
+        autoPasteEnabled = savedAutoPaste;
+        autoEnterEnabled = savedAutoEnter;
+
+        autoPaste.addEventListener('change', async (e) => {
+            autoPasteEnabled = e.target.checked;
+            await invoke('set_auto_paste', { enabled: autoPasteEnabled }).catch(() => {});
+        });
+
+        autoEnter.addEventListener('change', async (e) => {
+            autoEnterEnabled = e.target.checked;
+            await invoke('set_auto_enter', { enabled: autoEnterEnabled }).catch(() => {});
+        });
+
         updateButtonStates();
 
         if (isServerRunning) {
-            const accessURL = await invoke('get_access_url');
-            showQRCode(accessURL);
-            desktopWS.connect(accessURL);
+            // 验证服务器是否真的在运行
+            try {
+                const accessURL = await invoke('get_access_url');
+                // 尝试连接 WebSocket 来验证服务器状态
+                // 如果连接失败，说明服务器实际没运行
+                const testWS = new WebSocket(accessURL.replace('http://', 'ws://').replace('https://', 'wss://') + '/ws');
+
+                const connectionTest = new Promise((resolve) => {
+                    const timeout = setTimeout(() => resolve(false), 1000);
+                    testWS.onopen = () => {
+                        clearTimeout(timeout);
+                        testWS.close();
+                        resolve(true);
+                    };
+                    testWS.onerror = () => {
+                        clearTimeout(timeout);
+                        resolve(false);
+                    };
+                    testWS.onclose = () => {
+                        clearTimeout(timeout);
+                        resolve(false);
+                    };
+                });
+
+                const serverAlive = await connectionTest;
+
+                if (serverAlive) {
+                    showQRCode(accessURL);
+                    desktopWS.connect(accessURL);
+                } else {
+                    // 服务器实际没运行，重置状态
+                    isServerRunning = false;
+                    await invoke('stop_server').catch(() => {});
+                    updateButtonStates();
+                }
+            } catch (e) {
+                // 出错时也重置状态
+                isServerRunning = false;
+                await invoke('stop_server').catch(() => {});
+                updateButtonStates();
+            }
         }
     } catch {}
 }
@@ -314,10 +407,9 @@ function populateIPSelect(ips) {
     if (!ips || ips.length === 0) return;
 
     ips.forEach(ip => {
-        if (ip === '0.0.0.0') return;
         const option = document.createElement('option');
         option.value = ip;
-        option.textContent = ip;
+        option.textContent = ip === '0.0.0.0' ? '0.0.0.0 (所有网卡)' : ip;
         if (ip === selectedIP) {
             option.selected = true;
         }
@@ -333,6 +425,7 @@ function updateButtonStates() {
 
     if (isServerRunning) {
         statusDot.classList.add('running');
+        statusDot.style.background = '';
         statusText.textContent = '运行中';
         startBtn.disabled = true;
         stopBtn.disabled = false;
@@ -342,6 +435,7 @@ function updateButtonStates() {
         stopBtn.classList.add('btn-danger');
     } else {
         statusDot.classList.remove('running');
+        statusDot.style.background = '';
         statusText.textContent = '未启动';
         startBtn.disabled = false;
         stopBtn.disabled = true;
@@ -355,32 +449,40 @@ function updateButtonStates() {
 function showQRCode(accessURL) {
     const qrContainer = document.getElementById('qrcode');
     const accessUrlDiv = document.getElementById('accessUrl');
-    const copyLink = document.getElementById('copyLink');
 
     document.querySelector('.qrcode-container').classList.add('visible');
 
-    qrContainer.innerHTML = '';
-    new QRCode(qrContainer, {
-        text: accessURL,
-        width: 200,
-        height: 200,
-        colorDark: '#000000',
-        colorLight: '#ffffff',
-        correctLevel: QRCode.CorrectLevel.H
-    });
-
     accessUrlDiv.textContent = accessURL;
     accessUrlDiv.style.display = 'block';
-    copyLink.style.display = 'block';
 
     accessUrlDiv.onclick = async () => {
         await navigator.clipboard.writeText(accessURL);
         const originalText = accessUrlDiv.textContent;
         accessUrlDiv.textContent = '✓ 已复制';
+        accessUrlDiv.style.color = '#34C759';
         setTimeout(() => {
             accessUrlDiv.textContent = accessURL;
+            accessUrlDiv.style.color = '#3b82f6';
         }, 1000);
     };
+
+    qrContainer.innerHTML = '';
+
+    const url = new URL(accessURL);
+    const hostname = url.hostname;
+
+    if (hostname !== '0.0.0.0') {
+        new QRCode(qrContainer, {
+            text: accessURL,
+            width: 200,
+            height: 200,
+            colorDark: '#000000',
+            colorLight: '#ffffff',
+            correctLevel: QRCode.CorrectLevel.H
+        });
+    } else {
+        qrContainer.innerHTML = '<p style="color: #6b7280; font-size: 13px; margin-top: 60px;">0.0.0.0 模式不生成二维码<br>请手动输入地址</p>';
+    }
 }
 
 function addReceivedHistory(text, deviceName) {
@@ -438,7 +540,6 @@ document.addEventListener('change', async (e) => {
     if (e.target && e.target.id === 'ipSelect') {
         selectedIP = e.target.value;
         document.getElementById('ipDisplay').textContent = selectedIP;
-        const invoke = await getInvoke();
         await invoke('set_selected_ip', { ip: selectedIP });
     }
 }, true);
@@ -447,7 +548,6 @@ document.getElementById('startBtn').addEventListener('click', async () => {
     const startBtn = document.getElementById('startBtn');
     startBtn.disabled = true;
 
-    const invoke = await getInvoke();
     const portInput = document.getElementById('portInput');
     const port = portInput.value;
     await invoke('set_port', { port });
@@ -467,7 +567,6 @@ document.getElementById('stopBtn').addEventListener('click', async () => {
     const stopBtn = document.getElementById('stopBtn');
     stopBtn.disabled = true;
 
-    const invoke = await getInvoke();
     await invoke('stop_server');
 
     isServerRunning = await invoke('is_running');
@@ -475,17 +574,5 @@ document.getElementById('stopBtn').addEventListener('click', async () => {
     updateButtonStates();
 
     document.querySelector('.qrcode-container').classList.remove('visible');
-    document.getElementById('copyLink').style.display = 'none';
     desktopWS.disconnect();
-});
-
-document.getElementById('copyLink').addEventListener('click', async () => {
-    const invoke = await getInvoke();
-    const accessURL = await invoke('get_access_url');
-    await navigator.clipboard.writeText(accessURL);
-    const copyLink = document.getElementById('copyLink');
-    copyLink.textContent = '已复制!';
-    setTimeout(() => {
-        copyLink.textContent = '复制链接';
-    }, 1500);
 });

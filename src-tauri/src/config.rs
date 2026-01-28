@@ -7,6 +7,10 @@ pub struct Config {
     pub port: String,
     pub ip: String,
     pub was_running: bool,
+    #[serde(default)]
+    pub auto_paste: bool,
+    #[serde(default)]
+    pub auto_enter: bool,
 }
 
 impl Default for Config {
@@ -15,6 +19,8 @@ impl Default for Config {
             port: "5000".to_string(),
             ip: String::new(),
             was_running: false,
+            auto_paste: true,
+            auto_enter: false,
         }
     }
 }

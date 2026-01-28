@@ -12,18 +12,21 @@ use axum::{
 use serde_json::Value;
 use std::sync::Arc;
 use tokio::net::TcpListener;
+use tokio::sync::Mutex;
 use tower_http::cors::CorsLayer;
 
 pub struct Server {
     config: Config,
     hub: Arc<Hub>,
+    auto_enter: Arc<Mutex<bool>>,
 }
 
 impl Server {
-    pub fn new(config: Config) -> Self {
+    pub fn new(config: Config, auto_enter: Arc<Mutex<bool>>) -> Self {
         Self {
             config,
             hub: Arc::new(Hub::new()),
+            auto_enter,
         }
     }
 
@@ -33,7 +36,7 @@ impl Server {
             .route("/ws", any(websocket_handler))
             .route("/type", any(type_handler))
             .layer(CorsLayer::permissive())
-            .with_state(self.hub.clone());
+            .with_state((self.hub.clone(), self.auto_enter.clone()));
 
         let addr = format!("0.0.0.0:{}", self.config.port);
         let listener = TcpListener::bind(&addr).await?;
@@ -47,15 +50,21 @@ async fn index_handler() -> impl IntoResponse {
     Html(include_str!("../assets/mobile.html"))
 }
 
-async fn type_handler(Json(payload): Json<Value>) -> impl IntoResponse {
+async fn type_handler(
+    State((_hub, auto_enter)): State<(Arc<Hub>, Arc<Mutex<bool>>)>,
+    Json(payload): Json<Value>,
+) -> impl IntoResponse {
     if let Some(text) = payload.get("text").and_then(|v| v.as_str()) {
-        crate::virtual_keyboard::paste_text(text).await.ok();
+        let append_enter = payload.get("append_enter")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(*auto_enter.lock().await);
+        crate::virtual_keyboard::paste_text(text, append_enter).await.ok();
     }
     Json(serde_json::json!({"success": true}))
 }
 
 async fn websocket_handler(
-    State(hub): State<Arc<Hub>>,
+    State((hub, _auto_enter)): State<(Arc<Hub>, Arc<Mutex<bool>>)>,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
     ws.on_upgrade(|socket| handle_socket(hub, socket))
@@ -151,7 +160,10 @@ async fn handle_socket(hub: Arc<Hub>, socket: WebSocket) {
                             }
                             crate::types::MessageType::Send => {
                                 if let Some(text_val) = ws_msg.data.get("text").and_then(|v| v.as_str()) {
-                                    crate::virtual_keyboard::paste_text(text_val).await.ok();
+                                    let append_enter = ws_msg.data.get("append_enter")
+                                        .and_then(|v| v.as_bool())
+                                        .unwrap_or(false);
+                                    crate::virtual_keyboard::paste_text(text_val, append_enter).await.ok();
                                 }
                             }
                             crate::types::MessageType::Clear => {

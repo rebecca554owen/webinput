@@ -61,9 +61,10 @@ pub async fn start_server(state: State<'_, AppState>) -> Result<(), String> {
     let selected_ip = state.selected_ip.lock().await.clone();
     let port = state.port.lock().await.clone();
     let access_url = format!("http://{}:{}", selected_ip, port);
+    let auto_enter = state.auto_enter.clone();
 
     let handle = tokio::spawn(async move {
-        let server = crate::server::Server::new(config);
+        let server = crate::server::Server::new(config, auto_enter);
         let _ = server.start().await;
     });
 
@@ -100,4 +101,30 @@ pub async fn get_access_url(state: State<'_, AppState>) -> Result<String, String
 #[tauri::command]
 pub async fn is_running(state: State<'_, AppState>) -> Result<bool, String> {
     Ok(*state.is_running.lock().await)
+}
+
+#[tauri::command]
+pub async fn get_auto_paste(state: State<'_, AppState>) -> Result<bool, String> {
+    Ok(*state.auto_paste.lock().await)
+}
+
+#[tauri::command]
+pub async fn set_auto_paste(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
+    *state.auto_paste.lock().await = enabled;
+    state.config.lock().await.auto_paste = enabled;
+    state.config.lock().await.save().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_auto_enter(state: State<'_, AppState>) -> Result<bool, String> {
+    Ok(*state.auto_enter.lock().await)
+}
+
+#[tauri::command]
+pub async fn set_auto_enter(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
+    *state.auto_enter.lock().await = enabled;
+    state.config.lock().await.auto_enter = enabled;
+    state.config.lock().await.save().map_err(|e| e.to_string())?;
+    Ok(())
 }

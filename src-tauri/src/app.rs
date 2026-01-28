@@ -13,6 +13,8 @@ pub struct AppState {
     pub port: Arc<Mutex<String>>,
     pub is_running: Arc<Mutex<bool>>,
     pub server_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
+    pub auto_paste: Arc<Mutex<bool>>,
+    pub auto_enter: Arc<Mutex<bool>>,
 }
 
 impl AppState {
@@ -20,6 +22,8 @@ impl AppState {
         let config = Config::load();
         let port = config.port.clone();
         let was_running = config.was_running;
+        let auto_paste = config.auto_paste;
+        let auto_enter = config.auto_enter;
 
         let all_ips = get_all_ips();
         let main_ip = all_ips.get(1).cloned().unwrap_or_else(|| "127.0.0.1".to_string());
@@ -35,6 +39,8 @@ impl AppState {
             port: Arc::new(Mutex::new(port)),
             is_running: Arc::new(Mutex::new(was_running)),
             server_handle: Arc::new(Mutex::new(None)),
+            auto_paste: Arc::new(Mutex::new(auto_paste)),
+            auto_enter: Arc::new(Mutex::new(auto_enter)),
         }
     }
 }
