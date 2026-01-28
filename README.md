@@ -34,7 +34,7 @@ WebInput 提供了一个优雅的解决方案：
 ## 系统架构
 
 ```
-桌面端 (Wails)          WebSocket Hub          手机端 (浏览器)
+桌面端 (Tauri)         WebSocket Hub          手机端 (浏览器)
     │                        │                      │
     ├─ 桌面端界面             │                      ├─ 输入界面
     ├─ WebSocket 客户端  ←───┼───────────→          ├─ WebSocket 客户端
@@ -61,18 +61,14 @@ WebInput 提供了一个优雅的解决方案：
 
 ### 环境要求
 
-- Go 1.25+
+- Rust 1.85+
 - Node.js 25+
-- Wails CLI v2.11+
+- Tauri CLI 2.x
 
 ### 安装
 
 ```bash
-# 安装 Wails CLI
-go install github.com/wailsapp/wails/v2/cmd/wails@latest
-
 # 安装前端依赖
-cd frontend
 npm install
 ```
 
@@ -80,34 +76,32 @@ npm install
 
 ```bash
 # 开发模式（热重载）
-wails dev
+npm run tauri:dev
 
 # 生产构建
-wails build --clean
+npm run tauri:build
 ```
 
 ### 项目结构
 
 ```
 webinput/
-├── main.go                          # 应用入口
-├── build/app.go                     # Wails 应用逻辑
-├── internal/
-│   ├── server/                      # HTTP 服务器
-│   │   ├── server.go
-│   │   └── assets/mobile.html      # 手机端界面（嵌入）
-│   ├── websocket/                   # WebSocket Hub
-│   │   ├── hub.go                   # 连接管理器
-│   │   ├── client.go                # WebSocket 客户端
-│   │   ├── server.go                # WebSocket 服务器
-│   │   └── types.go                 # 消息类型定义
-│   ├── virtualkeyboard/             # 虚拟键盘
-│   ├── config/                      # 配置管理
-│   └── logger/                      # 日志
-├── frontend/                        # 桌面端 UI
-│   ├── main.js
-│   └── index.html
-└── wails.json                       # Wails 配置
+├── src-tauri/
+│   ├── src/
+│   │   ├── main.rs                   # Rust 应用入口
+│   │   ├── lib.rs                    # Tauri 库入口
+│   │   ├── commands.rs               # Tauri 命令定义
+│   │   ├── app.rs                    # 应用生命周期管理
+│   │   ├── server.rs                 # Axum HTTP 服务器
+│   │   ├── hub.rs                    # WebSocket Hub
+│   │   ├── types.rs                  # WebSocket 消息类型
+│   │   ├── virtual_keyboard.rs       # 虚拟键盘实现
+│   │   └── config.rs                 # 配置管理
+│   ├── Cargo.toml                    # Rust 依赖配置
+│   └── tauri.conf.json               # Tauri 应用配置
+├── index.html                        # 手机端界面
+├── main.js                           # 桌面端 UI 逻辑
+└── package.json                      # Node.js 依赖配置
 ```
 
 ## 发布

@@ -23,7 +23,7 @@ pnpm-debug.log*
 
 # 忽略构建产物
 dist/
-build/bin/
+src-tauri/target/
 .next/
 .nuxt/
 .vite/
@@ -39,3 +39,13 @@ build/bin/
 .DS_Store
 Thumbs.db
 nul
+
+# Tauri 构建产物
+src-tauri/target/
+
+# Tauri 构建输出
+*.msi
+*.app
+*.dmg
+*.deb
+*.AppImage

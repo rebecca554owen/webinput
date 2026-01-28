@@ -29,32 +29,37 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Go
-        uses: actions/setup-go@v6
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
-          go-version-file: 'go.mod'
-          cache: true
+          toolchain: stable
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
           node-version: '25'
           cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: package-lock.json
 
-      - name: Install Wails CLI
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+      - name: Install dependencies
+        run: npm ci
 
-      - name: Update version in wails.json
+      - name: Update version in tauri.conf.json
         run: |
           $version = "${{ github.event.inputs.version }}" -replace "^v", ""
-          (Get-Content wails.json) -replace '"productVersion":\s*"[^"]*"', "`"productVersion`": `"$version`"" | Set-Content wails.json
+          $json = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          $json.version = $version
+          $json | ConvertTo-Json -Depth 32 | Set-Content src-tauri/tauri.conf.json
 
-      - name: Build Wails application
+      - name: Update version in Cargo.toml
         run: |
-          # 设置前端构建版本环境变量并构建
+          $version = "${{ github.event.inputs.version }}" -replace "^v", ""
+          (Get-Content src-tauri/Cargo.toml) -replace '^version = ".*"', "version = `"$version`"" | Set-Content src-tauri/Cargo.toml
+
+      - name: Build Tauri application
+        run: |
           $env:VITE_VERSION="${{ github.event.inputs.version }}"
-          wails build -platform windows/amd64 -clean
+          npm run tauri:build
 
       - name: Get build time (UTC+8)
         id: time
@@ -64,8 +69,7 @@ jobs:
 
       - name: Move build artifact to root
         run: |
-          # 将构建产物移动到根目录以便发布
-          Copy-Item build/bin/webinput.exe -Destination webinput.exe
+          Copy-Item src-tauri/target/release/bundle/nsis/WebInput_*_x64_en-US.NSIS.exe -Destination webinput.exe
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
