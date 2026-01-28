@@ -6,7 +6,7 @@ on:
       version:
         description: '版本号 (必须以v开头，例如: v1.0.0, v2.1.3, v1.0.0-beta, v3.2.1-rc1)'
         required: true
-        default: 'v1.0.0'
+        default: 'v1.1.0'
 
 permissions:
   contents: write
@@ -20,20 +20,16 @@ jobs:
         include:
           - os: windows-latest
             platform: windows/amd64
-            bundle_name: nsis
             asset_name: webinput-windows-amd64.exe
           - os: macos-latest
             platform: darwin/amd64
-            bundle_name: dmg
-            asset_name: webinput-darwin-amd64.dmg
+            asset_name: webinput-darwin-amd64
           - os: macos-latest
             platform: darwin/arm64
-            bundle_name: dmg
-            asset_name: webinput-darwin-arm64.dmg
+            asset_name: webinput-darwin-arm64
           - os: ubuntu-latest
             platform: linux/amd64
-            bundle_name: appimage
-            asset_name: webinput-linux-amd64.AppImage
+            asset_name: webinput-linux-amd64
 
     runs-on: ${{ matrix.os }}
 
@@ -66,7 +62,9 @@ jobs:
             build-essential \
             libgtk-3-dev \
             libayatana-appindicator3-dev \
-            librsvg2-dev
+            librsvg2-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev
 
       - name: Update version in tauri.conf.json (Windows)
         if: runner.os == 'Windows'
@@ -81,7 +79,11 @@ jobs:
         run: |
           VERSION="${{ github.event.inputs.version }}"
           VERSION="${VERSION#v}"
-          sed -i "s/\"version\":\s*\"[^\"]*\"/\"version\": \"$VERSION\"/" src-tauri/tauri.conf.json
+          if [[ "$OSTYPE" == "darwin"* ]]; then
+            sed -i '' "s/\"version\":\s*\"[^\"]*\"/\"version\": \"$VERSION\"/" src-tauri/tauri.conf.json
+          else
+            sed -i "s/\"version\":\s*\"[^\"]*\"/\"version\": \"$VERSION\"/" src-tauri/tauri.conf.json
+          fi
 
       - name: Update version in Cargo.toml (Windows)
         if: runner.os == 'Windows'
@@ -94,7 +96,11 @@ jobs:
         run: |
           VERSION="${{ github.event.inputs.version }}"
           VERSION="${VERSION#v}"
-          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
+          if [[ "$OSTYPE" == "darwin"* ]]; then
+            sed -i '' "s/^version = \".*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
+          else
+            sed -i "s/^version = \".*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
+          fi
 
       - name: Build Tauri application (Windows)
         if: runner.os == 'Windows'
@@ -110,19 +116,18 @@ jobs:
 
       - name: Move build artifact to root (Windows)
         if: runner.os == 'Windows'
-        run: Copy-Item src-tauri/target/release/bundle/${{ matrix.bundle_name }}/*.exe -Destination ${{ matrix.asset_name }}
+        run: Copy-Item src-tauri/target/release/webinput.exe -Destination ${{ matrix.asset_name }}
 
       - name: Move build artifact to root (macOS)
         if: runner.os == 'macOS'
         run: |
-          BUNDLE_PATH=$(find src-tauri/target/release/bundle -name "*.dmg" | head -n 1)
-          cp "$BUNDLE_PATH" "${{ matrix.asset_name }}"
+          cp src-tauri/target/release/webinput "${{ matrix.asset_name }}"
+          chmod +x "${{ matrix.asset_name }}"
 
       - name: Move build artifact to root (Linux)
         if: runner.os == 'Linux'
         run: |
-          BUNDLE_PATH=$(find src-tauri/target/release/bundle -name "*.AppImage" | head -n 1)
-          cp "$BUNDLE_PATH" "${{ matrix.asset_name }}"
+          cp src-tauri/target/release/webinput "${{ matrix.asset_name }}"
           chmod +x "${{ matrix.asset_name }}"
 
       - name: Upload artifact
@@ -164,14 +169,14 @@ jobs:
             | 平台 | 架构 | 下载链接 |
             |------|------|----------|
             | Windows | amd64 | [webinput-windows-amd64.exe](https://github.com/${{ github.repository }}/releases/download/${{ github.event.inputs.version }}/webinput-windows-amd64.exe) |
-            | macOS | amd64 (Intel) | [webinput-darwin-amd64.dmg](https://github.com/${{ github.repository }}/releases/download/${{ github.event.inputs.version }}/webinput-darwin-amd64.dmg) |
-            | macOS | arm64 (Apple Silicon) | [webinput-darwin-arm64.dmg](https://github.com/${{ github.repository }}/releases/download/${{ github.event.inputs.version }}/webinput-darwin-arm64.dmg) |
-            | Linux | amd64 | [webinput-linux-amd64.AppImage](https://github.com/${{ github.repository }}/releases/download/${{ github.event.inputs.version }}/webinput-linux-amd64.AppImage) |
+            | macOS | amd64 (Intel) | [webinput-darwin-amd64](https://github.com/${{ github.repository }}/releases/download/${{ github.event.inputs.version }}/webinput-darwin-amd64) |
+            | macOS | arm64 (Apple Silicon) | [webinput-darwin-arm64](https://github.com/${{ github.repository }}/releases/download/${{ github.event.inputs.version }}/webinput-darwin-arm64) |
+            | Linux | amd64 | [webinput-linux-amd64](https://github.com/${{ github.repository }}/releases/download/${{ github.event.inputs.version }}/webinput-linux-amd64) |
 
             **使用说明**:
             - **Windows**: 下载 `webinput-windows-amd64.exe`，双击运行
-            - **macOS**: 下载对应架构的 `.dmg` 文件，拖拽到 Applications 文件夹
-            - **Linux**: 下载 `webinput-linux-amd64.AppImage`，在终端运行 `chmod +x webinput-linux-amd64.AppImage` 后执行
+            - **macOS**: 下载对应架构的文件，在终端运行 `chmod +x webinput-darwin-*` 后执行
+            - **Linux**: 下载 `webinput-linux-amd64`，在终端运行 `chmod +x webinput-linux-amd64` 后执行
 
             *构建时间: ${{ steps.time.outputs.build_time }}*
             *提交: [${{ github.sha }}](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }})*

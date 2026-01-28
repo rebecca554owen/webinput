@@ -4,7 +4,7 @@ import { resolve } from 'path'
 
 function getCargoVersion() {
   try {
-    const cargoPath = resolve(__dirname, '../src-tauri/Cargo.toml')
+    const cargoPath = resolve(__dirname, 'src-tauri/Cargo.toml')
     const cargoContent = readFileSync(cargoPath, 'utf-8')
     const match = cargoContent.match(/^version = "([^"]+)"/m)
     return match ? match[1] : 'dev'
@@ -16,6 +16,7 @@ function getCargoVersion() {
 export default defineConfig(({ mode }) => {
   return {
     base: './',
+    root: 'frontend',
     server: {
       port: 5173
     },

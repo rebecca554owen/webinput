@@ -4,7 +4,6 @@ use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    pub mode: String,
     pub port: String,
     pub ip: String,
     pub was_running: bool,
@@ -13,7 +12,6 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            mode: "lan".to_string(),
             port: "5000".to_string(),
             ip: String::new(),
             was_running: false,

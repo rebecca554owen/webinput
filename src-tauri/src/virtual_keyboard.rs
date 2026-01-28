@@ -38,7 +38,8 @@ mod linux {
         ctx.set_contents(text.to_string())?;
 
         unsafe {
-            use x11::xlib::{XOpenDisplay, XTestFakeKeyEvent, XFlush};
+            use x11::xlib::{XOpenDisplay, XFlush};
+            use x11::xtest::XTestFakeKeyEvent;
 
             let display = XOpenDisplay(std::ptr::null());
             if display.is_null() {
@@ -64,11 +65,10 @@ mod macos {
     pub async fn paste_text(text: &str) -> Result<(), Box<dyn std::error::Error>> {
         use objc::{msg_send, sel, sel_impl};
         use cocoa::appkit::{NSPasteboard, NSStringPboardType};
-        use cocoa::base::{id, nil};
+        use cocoa::base::nil;
         use cocoa::foundation::NSString;
-        use core_foundation::base::TCFType;
         use core_graphics::event::{CGEvent, CGEventTapLocation};
-        use core_graphics::keycode::KeyCode;
+        use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 
         unsafe {
             let pasteboard = NSPasteboard::generalPasteboard(nil);
@@ -79,10 +79,12 @@ mod macos {
             let kVK_Control = 0x3Bu8;
             let kVK_ANSI_V = 0x09u8;
 
-            let control_down = CGEvent::new_keyboard_event(CGEventTapLocation::HID, kVK_Control as _, true);
-            let v_down = CGEvent::new_keyboard_event(CGEventTapLocation::HID, kVK_ANSI_V as _, true);
-            let v_up = CGEvent::new_keyboard_event(CGEventTapLocation::HID, kVK_ANSI_V as _, false);
-            let control_up = CGEvent::new_keyboard_event(CGEventTapLocation::HID, kVK_Control as _, false);
+            let source = CGEventSource::new(CGEventSourceStateID::Private).expect("Failed to create event source");
+
+            let control_down = CGEvent::new_keyboard_event(source.clone(), kVK_Control as _, true).expect("Failed to create Control down event");
+            let v_down = CGEvent::new_keyboard_event(source.clone(), kVK_ANSI_V as _, true).expect("Failed to create V down event");
+            let v_up = CGEvent::new_keyboard_event(source.clone(), kVK_ANSI_V as _, false).expect("Failed to create V up event");
+            let control_up = CGEvent::new_keyboard_event(source, kVK_Control as _, false).expect("Failed to create Control up event");
 
             control_down.post(CGEventTapLocation::Session);
             v_down.post(CGEventTapLocation::Session);

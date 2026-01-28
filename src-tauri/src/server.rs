@@ -37,7 +37,6 @@ impl Server {
 
         let addr = format!("0.0.0.0:{}", self.config.port);
         let listener = TcpListener::bind(&addr).await?;
-        println!("服务器运行在: {}", addr);
 
         axum::serve(listener, app).await?;
         Ok(())
@@ -69,8 +68,8 @@ async fn handle_socket(hub: Arc<Hub>, socket: WebSocket) {
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<axum::extract::ws::Message>();
 
-    let device_id = uuid::Uuid::new_v4().to_string();
-    hub.register_mobile(device_id.clone(), tx).await;
+    let mut client_id: Option<String> = None;
+    let mut client_type: Option<crate::types::ClientType> = None;
 
     let send_task = tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
@@ -87,7 +86,64 @@ async fn handle_socket(hub: Arc<Hub>, socket: WebSocket) {
                 axum::extract::ws::Message::Text(text) => {
                     if let Ok(ws_msg) = serde_json::from_str::<crate::types::WSMessage>(&text) {
                         match ws_msg.msg_type {
+                            crate::types::MessageType::Connect => {
+                                if let Some(data) = ws_msg.data.as_object() {
+                                    if let Some(type_str) = data.get("type").and_then(|v| v.as_str()) {
+                                        let parsed_type = match type_str {
+                                            "desktop" => crate::types::ClientType::Desktop,
+                                            "mobile" => crate::types::ClientType::Mobile,
+                                            _ => continue,
+                                        };
+
+                                        let id = data.get("device_id")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or(&uuid::Uuid::new_v4().to_string())
+                                            .to_string();
+
+                                        match parsed_type {
+                                            crate::types::ClientType::Desktop => {
+                                                hub_clone.close_old_desktop().await;
+                                                hub_clone.register_desktop(tx.clone()).await;
+                                            }
+                                            crate::types::ClientType::Mobile => {
+                                                if let Some(session) = hub_clone.get_device_session(&id).await {
+                                                    if !session.last_content.is_empty() {
+                                                        let restore_msg = crate::types::WSMessage {
+                                                            msg_type: crate::types::MessageType::Preview,
+                                                            data: serde_json::json!({
+                                                                "text": session.last_content,
+                                                                "length": session.last_content.len(),
+                                                                "device_name": session.device_name,
+                                                                "device_id": session.device_id,
+                                                                "restore": true
+                                                            }),
+                                                            timestamp: Some(chrono::Utc::now().timestamp()),
+                                                            client_id: Some(id.clone()),
+                                                        };
+                                                        hub_clone.send_to_desktop(restore_msg).await.ok();
+                                                    }
+                                                }
+                                                hub_clone.register_mobile(id.clone(), tx.clone()).await;
+                                            }
+                                        }
+
+                                        client_id = Some(id.clone());
+                                        client_type = Some(parsed_type);
+                                    }
+                                }
+                            }
                             crate::types::MessageType::Preview => {
+                                if let Some(id) = &client_id {
+                                    if let Some(data) = ws_msg.data.as_object() {
+                                        let text = data.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                        let d_name = data.get("device_name")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("")
+                                            .to_string();
+
+                                        hub_clone.update_device_session(id.clone(), d_name, text).await;
+                                    }
+                                }
                                 hub_clone.send_to_desktop(ws_msg).await.ok();
                             }
                             crate::types::MessageType::Sync => {
@@ -101,7 +157,6 @@ async fn handle_socket(hub: Arc<Hub>, socket: WebSocket) {
                             crate::types::MessageType::Clear => {
                                 hub_clone.send_to_desktop(ws_msg).await.ok();
                             }
-                            _ => {}
                         }
                     }
                 }
@@ -109,7 +164,16 @@ async fn handle_socket(hub: Arc<Hub>, socket: WebSocket) {
                 _ => {}
             }
         }
-        hub_clone.unregister_mobile(&device_id).await;
+        if let (Some(id), Some(ctype)) = (client_id, client_type) {
+            match ctype {
+                crate::types::ClientType::Desktop => {
+                    hub_clone.unregister_desktop().await;
+                }
+                crate::types::ClientType::Mobile => {
+                    hub_clone.unregister_mobile(&id).await;
+                }
+            }
+        }
     });
 
     tokio::select! {

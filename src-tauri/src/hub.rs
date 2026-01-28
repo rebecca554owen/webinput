@@ -23,25 +23,28 @@ impl Hub {
     pub async fn register_desktop(&self, sender: ClientSender) {
         let mut desktop = self.desktop.write().await;
         *desktop = Some(sender);
-        println!("桌面端已连接");
+    }
+
+    pub async fn close_old_desktop(&self) {
+        let mut desktop = self.desktop.write().await;
+        if let Some(old_sender) = desktop.take() {
+            let _ = old_sender.send(axum::extract::ws::Message::Close(None));
+        }
     }
 
     pub async fn register_mobile(&self, id: String, sender: ClientSender) {
         let mut mobiles = self.mobiles.write().await;
         mobiles.insert(id.clone(), sender);
-        println!("手机端已连接: {}", id);
     }
 
     pub async fn unregister_desktop(&self) {
         let mut desktop = self.desktop.write().await;
         *desktop = None;
-        println!("桌面端已断开");
     }
 
     pub async fn unregister_mobile(&self, id: &str) {
         let mut mobiles = self.mobiles.write().await;
         mobiles.remove(id);
-        println!("手机端已断开: {}", id);
     }
 
     pub async fn send_to_desktop(&self, msg: WSMessage) -> Result<(), Box<dyn std::error::Error>> {
@@ -63,15 +66,6 @@ impl Hub {
         for sender in mobiles.values() {
             let _ = sender.send(axum::extract::ws::Message::Text(json.clone()));
         }
-    }
-
-    pub async fn send_to_mobile(&self, id: &str, msg: WSMessage) -> Result<(), Box<dyn std::error::Error>> {
-        let mobiles = self.mobiles.read().await;
-        if let Some(sender) = mobiles.get(id) {
-            let json = serde_json::to_string(&msg)?;
-            sender.send(axum::extract::ws::Message::Text(json))?;
-        }
-        Ok(())
     }
 
     pub async fn update_device_session(&self, device_id: String, device_name: String, content: String) {

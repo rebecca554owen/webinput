@@ -153,7 +153,6 @@
             const ws = new WebSocket('ws://' + window.location.host + '/ws?type=mobile');
 
             ws.onopen = function() {
-                console.log('WebSocket 已连接');
                 if (reconnectTimer) {
                     clearTimeout(reconnectTimer);
                     reconnectTimer = null;
@@ -180,17 +179,13 @@
                         },
                         timestamp: Date.now()
                     }));
-                } catch (e) {
-                    console.error('发送连接消息失败:', e);
-                }
+                } catch (e) {}
             };
 
-            ws.onerror = function(error) {
-                console.error('WebSocket 错误:', error);
-            };
+            ws.onerror = function(error) {};
+
 
             ws.onclose = function(event) {
-                console.log('WebSocket 已断开');
                 if (!reconnectTimer) {
                     reconnectTimer = setTimeout(() => {
                         connectWebSocket();
@@ -214,7 +209,6 @@
                 } else if (msg.type === 'connect') {
                     if (msg.data && msg.data.client_ip) {
                         clientIP = msg.data.client_ip;
-                        console.log('客户端IP:', clientIP);
                     }
                 }
             });
