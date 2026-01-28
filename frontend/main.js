@@ -287,6 +287,13 @@ class DesktopWebSocket {
             this.ws.close();
         }
     }
+
+    clearAllPreviews() {
+        this.devices.forEach((device, deviceId) => {
+            device.textarea.value = '';
+            device.lengthSpan.textContent = '0 字符';
+        });
+    }
 }
 
 const desktopWS = new DesktopWebSocket();
@@ -382,6 +389,7 @@ async function initApp() {
                 if (serverAlive) {
                     showQRCode(accessURL);
                     desktopWS.connect(accessURL);
+                    document.getElementById('previewContainer').style.display = '';
                 } else {
                     // 服务器实际没运行，重置状态
                     isServerRunning = false;
@@ -561,6 +569,7 @@ document.getElementById('startBtn').addEventListener('click', async () => {
     const accessURL = await invoke('get_access_url');
     showQRCode(accessURL);
     desktopWS.connect(accessURL);
+    document.getElementById('previewContainer').style.display = '';
 });
 
 document.getElementById('stopBtn').addEventListener('click', async () => {
@@ -575,4 +584,6 @@ document.getElementById('stopBtn').addEventListener('click', async () => {
 
     document.querySelector('.qrcode-container').classList.remove('visible');
     desktopWS.disconnect();
+    desktopWS.clearAllPreviews();
+    document.getElementById('previewContainer').style.display = 'none';
 });
