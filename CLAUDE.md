@@ -36,15 +36,27 @@ WebInput 是一个基于 Tauri 的桌面应用，允许手机通过浏览器远�
 
 **HTTP 服务器** (`src-tauri/src/server.rs`):
 - Axum Web 框架
-- 静态文件服务（index.html）
+- 静态文件服务（mobile.html）
 - WebSocket 升级处理
 
 **消息协议** (`src-tauri/src/types.rs`):
 ```rust
 pub struct WSMessage {
-    pub msg_type: String,  // preview, sync, send, clear, connect
+    #[serde(rename = "type")]
+    pub msg_type: MessageType,  // Preview, Sync, Send, Clear, Connect
     pub data: serde_json::Value,
-    pub timestamp: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timestamp: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<String>,
+}
+
+pub enum MessageType {
+    Preview,  // 预览消息
+    Sync,     // 同步消息
+    Send,     // 发送到虚拟键盘
+    Clear,    // 清空内容
+    Connect,  // 连接确认
 }
 ```
 
@@ -68,7 +80,7 @@ npm run tauri:build
 ```bash
 npm install      # 安装依赖
 npm run dev      # 开发服务器（Vite）
-npm run build    # 生产构建到 dist/
+npm run build    # 生产构建到 frontend/dist/
 ```
 
 ### 版本管理
@@ -93,7 +105,7 @@ npm run build    # 生产构建到 dist/
 | `src-tauri/Cargo.toml` | Rust 依赖配置 |
 | `src-tauri/tauri.conf.json` | Tauri 应用配置 |
 | `frontend/main.js` | 桌面端 WebSocket 客户端，UI 逻辑 |
-| `index.html` | 手机端界面（通过 Tauri 嵌入） |
+| `src-tauri/assets/mobile.html` | 手机端界面（通过 Axum 服务） |
 
 ## WebSocket 消息流
 
@@ -131,9 +143,9 @@ npm run build    # 生产构建到 dist/
 - UUID（设备 ID 生成）
 
 **前端**:
-- Vite 6.x
-- TypeScript 5.6.x
-- QRCode.js（二维码生成）
+- Vite 5.0.0（frontend） / 6.0.3（主项目）
+- TypeScript 5.6.2
+- qrcodejs2（二维码生成）
 
 **平台特定依赖**:
 - Windows: `winapi`, `clipboard-win`
@@ -142,7 +154,7 @@ npm run build    # 生产构建到 dist/
 
 ## 注意事项
 
-- 修改 `index.html` 或前端代码后，`npm run tauri:dev` 会自动重载
+- 修改 `mobile.html` 或前端代码后，`npm run tauri:dev` 会自动重载
 - Rust 代码修改需要重新编译
 - 跨平台开发需要注意平台特定的虚拟键盘实现
 - 版本号需要同时更新 `Cargo.toml` 和 `tauri.conf.json`
