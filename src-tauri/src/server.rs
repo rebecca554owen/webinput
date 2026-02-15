@@ -1,5 +1,6 @@
 use crate::config::Config;
 use crate::hub::Hub;
+use crate::types::{ClientType, MessageType, WSMessage};
 use axum::{
     extract::{
         State,
@@ -14,6 +15,15 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 use tower_http::cors::CorsLayer;
+
+const CLIENT_TYPE_DESKTOP: &str = "desktop";
+const CLIENT_TYPE_MOBILE: &str = "mobile";
+const DATA_TYPE_KEY: &str = "type";
+const DATA_DEVICE_ID_KEY: &str = "device_id";
+const DATA_TEXT_KEY: &str = "text";
+const DATA_DEVICE_NAME_KEY: &str = "device_name";
+const DATA_APPEND_ENTER_KEY: &str = "append_enter";
+const DATA_RESTORE_KEY: &str = "restore";
 
 pub struct Server {
     config: Config,
@@ -54,11 +64,13 @@ async fn type_handler(
     State((_hub, auto_enter)): State<(Arc<Hub>, Arc<Mutex<bool>>)>,
     Json(payload): Json<Value>,
 ) -> impl IntoResponse {
-    if let Some(text) = payload.get("text").and_then(|v| v.as_str()) {
-        let append_enter = payload.get("append_enter")
+    if let Some(text) = payload.get(DATA_TEXT_KEY).and_then(|v| v.as_str()) {
+        let append_enter = payload.get(DATA_APPEND_ENTER_KEY)
             .and_then(|v| v.as_bool())
             .unwrap_or(*auto_enter.lock().await);
-        crate::virtual_keyboard::paste_text(text, append_enter).await.ok();
+        if let Err(e) = crate::virtual_keyboard::paste_text(text, append_enter).await {
+            eprintln!("[type_handler] Failed to paste text: {}", e);
+        }
     }
     Json(serde_json::json!({"success": true}))
 }
@@ -78,7 +90,7 @@ async fn handle_socket(hub: Arc<Hub>, socket: WebSocket) {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<axum::extract::ws::Message>();
 
     let mut client_id: Option<String> = None;
-    let mut client_type: Option<crate::types::ClientType> = None;
+    let mut client_type: Option<ClientType> = None;
 
     let send_task = tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
@@ -93,103 +105,157 @@ async fn handle_socket(hub: Arc<Hub>, socket: WebSocket) {
         while let Some(Ok(msg)) = receiver.next().await {
             match msg {
                 axum::extract::ws::Message::Text(text) => {
-                    if let Ok(ws_msg) = serde_json::from_str::<crate::types::WSMessage>(&text) {
-                        match ws_msg.msg_type {
-                            crate::types::MessageType::Connect => {
-                                if let Some(data) = ws_msg.data.as_object() {
-                                    if let Some(type_str) = data.get("type").and_then(|v| v.as_str()) {
-                                        let parsed_type = match type_str {
-                                            "desktop" => crate::types::ClientType::Desktop,
-                                            "mobile" => crate::types::ClientType::Mobile,
-                                            _ => continue,
-                                        };
-
-                                        let id = data.get("device_id")
-                                            .and_then(|v| v.as_str())
-                                            .unwrap_or(&uuid::Uuid::new_v4().to_string())
-                                            .to_string();
-
-                                        match parsed_type {
-                                            crate::types::ClientType::Desktop => {
-                                                hub_clone.close_old_desktop().await;
-                                                hub_clone.register_desktop(tx.clone()).await;
-                                            }
-                                            crate::types::ClientType::Mobile => {
-                                                if let Some(session) = hub_clone.get_device_session(&id).await {
-                                                    if !session.last_content.is_empty() {
-                                                        let restore_msg = crate::types::WSMessage {
-                                                            msg_type: crate::types::MessageType::Preview,
-                                                            data: serde_json::json!({
-                                                                "text": session.last_content,
-                                                                "length": session.last_content.len(),
-                                                                "device_name": session.device_name,
-                                                                "device_id": session.device_id,
-                                                                "restore": true
-                                                            }),
-                                                            timestamp: Some(chrono::Utc::now().timestamp()),
-                                                            client_id: Some(id.clone()),
-                                                        };
-                                                        hub_clone.send_to_desktop(restore_msg).await.ok();
-                                                    }
-                                                }
-                                                hub_clone.register_mobile(id.clone(), tx.clone()).await;
-                                            }
-                                        }
-
-                                        client_id = Some(id.clone());
-                                        client_type = Some(parsed_type);
-                                    }
-                                }
-                            }
-                            crate::types::MessageType::Preview => {
-                                if let Some(id) = &client_id {
-                                    if let Some(data) = ws_msg.data.as_object() {
-                                        let text = data.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                                        let d_name = data.get("device_name")
-                                            .and_then(|v| v.as_str())
-                                            .unwrap_or("")
-                                            .to_string();
-
-                                        hub_clone.update_device_session(id.clone(), d_name, text).await;
-                                    }
-                                }
-                                hub_clone.send_to_desktop(ws_msg).await.ok();
-                            }
-                            crate::types::MessageType::Sync => {
-                                hub_clone.broadcast_to_mobiles(ws_msg).await;
-                            }
-                            crate::types::MessageType::Send => {
-                                if let Some(text_val) = ws_msg.data.get("text").and_then(|v| v.as_str()) {
-                                    let append_enter = ws_msg.data.get("append_enter")
-                                        .and_then(|v| v.as_bool())
-                                        .unwrap_or(false);
-                                    crate::virtual_keyboard::paste_text(text_val, append_enter).await.ok();
-                                }
-                            }
-                            crate::types::MessageType::Clear => {
-                                hub_clone.send_to_desktop(ws_msg).await.ok();
-                            }
-                        }
+                    if let Ok(ws_msg) = serde_json::from_str::<WSMessage>(&text) {
+                        handle_client_message(
+                            &hub_clone,
+                            &tx,
+                            ws_msg,
+                            &mut client_id,
+                            &mut client_type,
+                        ).await;
                     }
                 }
                 axum::extract::ws::Message::Close(_) => break,
                 _ => {}
             }
         }
+
         if let (Some(id), Some(ctype)) = (client_id, client_type) {
-            match ctype {
-                crate::types::ClientType::Desktop => {
-                    hub_clone.unregister_desktop().await;
-                }
-                crate::types::ClientType::Mobile => {
-                    hub_clone.unregister_mobile(&id).await;
-                }
-            }
+            unregister_client(&hub_clone, &id, ctype).await;
         }
     });
 
     tokio::select! {
         _ = send_task => {},
         _ = receive_task => {},
+    }
+}
+
+async fn handle_client_message(
+    hub: &Hub,
+    tx: &tokio::sync::mpsc::UnboundedSender<axum::extract::ws::Message>,
+    ws_msg: WSMessage,
+    client_id: &mut Option<String>,
+    client_type: &mut Option<ClientType>,
+) {
+    match ws_msg.msg_type {
+        MessageType::Connect => {
+            handle_connect_message(hub, tx, ws_msg, client_id, client_type).await;
+        }
+        MessageType::Preview => {
+            handle_preview_message(hub, ws_msg, client_id).await;
+        }
+        MessageType::Sync => {
+            hub.broadcast_to_mobiles(ws_msg).await;
+        }
+        MessageType::Send => {
+            handle_send_message(ws_msg).await;
+        }
+        MessageType::Clear => {
+            if let Err(e) = hub.send_to_desktop(ws_msg).await {
+                eprintln!("[handle_client_message] Failed to send clear message: {}", e);
+            }
+        }
+    }
+}
+
+async fn handle_connect_message(
+    hub: &Hub,
+    tx: &tokio::sync::mpsc::UnboundedSender<axum::extract::ws::Message>,
+    ws_msg: WSMessage,
+    client_id: &mut Option<String>,
+    client_type: &mut Option<ClientType>,
+) {
+    if let Some(data) = ws_msg.data.as_object() {
+        if let Some(type_str) = data.get(DATA_TYPE_KEY).and_then(|v| v.as_str()) {
+            let parsed_type = match type_str {
+                CLIENT_TYPE_DESKTOP => ClientType::Desktop,
+                CLIENT_TYPE_MOBILE => ClientType::Mobile,
+                _ => {
+                    eprintln!("[handle_connect_message] Unknown client type: {}", type_str);
+                    return;
+                }
+            };
+
+            let id = data.get(DATA_DEVICE_ID_KEY)
+                .and_then(|v| v.as_str())
+                .unwrap_or(&uuid::Uuid::new_v4().to_string())
+                .to_string();
+
+            match parsed_type {
+                ClientType::Desktop => {
+                    hub.close_old_desktop().await;
+                    hub.register_desktop(tx.clone()).await;
+                }
+                ClientType::Mobile => {
+                    restore_device_session(hub, &id).await;
+                    hub.register_mobile(id.clone(), tx.clone()).await;
+                }
+            }
+
+            *client_id = Some(id);
+            *client_type = Some(parsed_type);
+        }
+    }
+}
+
+async fn restore_device_session(hub: &Hub, device_id: &str) {
+    if let Some(session) = hub.get_device_session(device_id).await {
+        if !session.last_content.is_empty() {
+            let restore_msg = WSMessage {
+                msg_type: MessageType::Preview,
+                data: serde_json::json!({
+                    DATA_TEXT_KEY: session.last_content,
+                    "length": session.last_content.len(),
+                    DATA_DEVICE_NAME_KEY: session.device_name,
+                    DATA_DEVICE_ID_KEY: session.device_id,
+                    DATA_RESTORE_KEY: true
+                }),
+                timestamp: Some(chrono::Utc::now().timestamp()),
+                client_id: Some(device_id.to_string()),
+            };
+            if let Err(e) = hub.send_to_desktop(restore_msg).await {
+                eprintln!("[restore_device_session] Failed to send restore message: {}", e);
+            }
+        }
+    }
+}
+
+async fn handle_preview_message(hub: &Hub, ws_msg: WSMessage, client_id: &Option<String>) {
+    if let Some(id) = client_id {
+        if let Some(data) = ws_msg.data.as_object() {
+            let text = data.get(DATA_TEXT_KEY).and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let d_name = data.get(DATA_DEVICE_NAME_KEY)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            hub.update_device_session(id.clone(), d_name, text).await;
+        }
+    }
+    if let Err(e) = hub.send_to_desktop(ws_msg).await {
+        eprintln!("[handle_preview_message] Failed to send preview message: {}", e);
+    }
+}
+
+async fn handle_send_message(ws_msg: WSMessage) {
+    if let Some(text_val) = ws_msg.data.get(DATA_TEXT_KEY).and_then(|v| v.as_str()) {
+        let append_enter = ws_msg.data.get(DATA_APPEND_ENTER_KEY)
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if let Err(e) = crate::virtual_keyboard::paste_text(text_val, append_enter).await {
+            eprintln!("[handle_send_message] Failed to paste text: {}", e);
+        }
+    }
+}
+
+async fn unregister_client(hub: &Hub, id: &str, ctype: ClientType) {
+    match ctype {
+        ClientType::Desktop => {
+            hub.unregister_desktop().await;
+        }
+        ClientType::Mobile => {
+            hub.unregister_mobile(id).await;
+        }
     }
 }

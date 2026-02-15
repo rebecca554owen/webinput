@@ -1,13 +1,17 @@
 import { invoke } from '@tauri-apps/api/core';
 
-const sentHistory = [];
 const receivedHistory = [];
+
+function buildDeviceDisplayName(deviceName, clientIP) {
+    const name = deviceName || '未知设备';
+    const ip = clientIP || '';
+    return ip ? `${name} (${ip})` : name;
+}
 
 class DesktopWebSocket {
     constructor() {
         this.ws = null;
         this.devices = new Map();
-        this.reconnectTimer = null;
     }
 
     async connect(accessURL) {
@@ -47,8 +51,12 @@ class DesktopWebSocket {
                 }
             };
 
-            this.ws.onerror = () => {};
-        } catch {}
+            this.ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+            };
+        } catch (error) {
+            console.error('WebSocket connection error:', error);
+        }
     }
 
     send(data) {
@@ -67,9 +75,7 @@ class DesktopWebSocket {
             break;
         case 'history':
             if (msg.data && msg.data.text) {
-                const deviceName = msg.data.device_name || '未知设备';
-                const clientIP = msg.data.client_ip || '';
-                const displayName = clientIP ? `${deviceName} (${clientIP})` : deviceName;
+                const displayName = buildDeviceDisplayName(msg.data.device_name, msg.data.client_ip);
                 addReceivedHistory(msg.data.text, displayName);
 
                 if (autoPasteEnabled) {
@@ -79,7 +85,7 @@ class DesktopWebSocket {
             break;
         case 'clear':
             if (msg.data && msg.data.device_id) {
-                this.clearDevicePreview(msg.data.device_id);
+                this.clearDevice(msg.data.device_id, false);
             }
             break;
         }
@@ -98,12 +104,10 @@ class DesktopWebSocket {
 
     showPreview(data) {
         const deviceId = data.device_id || 'unknown';
-        const deviceName = data.device_name || '未知设备';
-        const clientIP = data.client_ip || '';
-        const displayName = clientIP ? `${deviceName} (${clientIP})` : deviceName;
+        const displayName = buildDeviceDisplayName(data.device_name, data.client_ip);
 
         if (!this.devices.has(deviceId)) {
-            this.createPreviewBox(deviceId, displayName, clientIP);
+            this.createPreviewBox(deviceId, displayName, data.client_ip);
         }
 
         const device = this.devices.get(deviceId);
@@ -233,28 +237,28 @@ class DesktopWebSocket {
                     }
                 });
             }
-        } catch {}
+        } catch (error) {
+            console.error('Failed to copy text:', error);
+        }
     }
 
-    clearDevice(deviceId) {
+    clearDevice(deviceId, sendMessage = true) {
         const device = this.devices.get(deviceId);
         if (!device) return;
 
         device.textarea.value = '';
         device.lengthSpan.textContent = '0 字符';
 
-        this.send({
-            type: 'clear',
-            data: { device_id: deviceId }
-        });
+        if (sendMessage) {
+            this.send({
+                type: 'clear',
+                data: { device_id: deviceId }
+            });
+        }
     }
 
     clearDevicePreview(deviceId) {
-        const device = this.devices.get(deviceId);
-        if (!device) return;
-
-        device.textarea.value = '';
-        device.lengthSpan.textContent = '0 字符';
+        this.clearDevice(deviceId, false);
     }
 
     updateConnectionStatus(connected) {
@@ -275,14 +279,7 @@ class DesktopWebSocket {
         }
     }
 
-    scheduleReconnect() {
-    // 不再使用重连逻辑，用户可以手动重新启动服务
-    }
-
     disconnect() {
-        if (this.reconnectTimer) {
-            clearTimeout(this.reconnectTimer);
-        }
         if (this.ws) {
             this.ws.close();
         }
@@ -349,12 +346,16 @@ async function initApp() {
 
         autoPaste.addEventListener('change', async (e) => {
             autoPasteEnabled = e.target.checked;
-            await invoke('set_auto_paste', { enabled: autoPasteEnabled }).catch(() => {});
+            await invoke('set_auto_paste', { enabled: autoPasteEnabled }).catch((error) => {
+                console.error('Failed to save auto-paste setting:', error);
+            });
         });
 
         autoEnter.addEventListener('change', async (e) => {
             autoEnterEnabled = e.target.checked;
-            await invoke('set_auto_enter', { enabled: autoEnterEnabled }).catch(() => {});
+            await invoke('set_auto_enter', { enabled: autoEnterEnabled }).catch((error) => {
+                console.error('Failed to save auto-enter setting:', error);
+            });
         });
 
         updateButtonStates();
@@ -393,17 +394,24 @@ async function initApp() {
                 } else {
                     // 服务器实际没运行，重置状态
                     isServerRunning = false;
-                    await invoke('stop_server').catch(() => {});
+                    await invoke('stop_server').catch((error) => {
+                        console.error('Failed to stop server:', error);
+                    });
                     updateButtonStates();
                 }
-            } catch (e) {
+            } catch (error) {
                 // 出错时也重置状态
+                console.error('Server validation error:', error);
                 isServerRunning = false;
-                await invoke('stop_server').catch(() => {});
+                await invoke('stop_server').catch((err) => {
+                    console.error('Failed to stop server after error:', err);
+                });
                 updateButtonStates();
             }
         }
-    } catch {}
+    } catch (error) {
+        console.error('App initialization error:', error);
+    }
 }
 
 function populateIPSelect(ips) {

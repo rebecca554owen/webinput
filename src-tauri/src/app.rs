@@ -18,6 +18,9 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// 创建新的应用状态实例
+    ///
+    /// 从配置文件加载配置，初始化所有状态字段
     pub fn new() -> Self {
         let config = Config::load();
         let port = config.port.clone();
@@ -43,8 +46,29 @@ impl AppState {
             auto_enter: Arc::new(Mutex::new(auto_enter)),
         }
     }
+
+    /// 更新配置并自动保存
+    ///
+    /// # 参数
+    /// * `f` - 一个闭包，接收可变配置引用并返回结果
+    ///
+    /// # 返回
+    /// 返回闭包的结果或保存时的错误信息
+    pub async fn update_config<F, T>(&self, f: F) -> Result<T, String>
+    where
+        F: FnOnce(&mut Config) -> T,
+    {
+        let mut config = self.config.lock().await;
+        let result = f(&mut config);
+        config.save().map_err(|e| e.to_string())?;
+        Ok(result)
+    }
 }
 
+/// 获取所有可用的网络接口 IP 地址
+///
+/// 按优先级排序：192.168.x.x > 10.x.x.x > 其他 > 虚拟 IP
+/// 始终将 0.0.0.0 放在首位
 fn get_all_ips() -> Vec<String> {
     let mut ips = Vec::new();
 

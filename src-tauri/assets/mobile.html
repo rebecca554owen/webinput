@@ -489,6 +489,16 @@
             }
         });
 
+        function sendMessage(type, data) {
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: type,
+                    data: data,
+                    timestamp: Date.now()
+                }));
+            }
+        }
+
         function getDeviceInfo() {
             const ua = navigator.userAgent;
             let deviceName = '未知设备';
@@ -499,32 +509,26 @@
                 localStorage.setItem('webinput_device_id', deviceId);
             }
 
-            if (/iPhone/.test(ua)) {
-                deviceName = 'iPhone';
-            } else if (/iPad/.test(ua)) {
-                deviceName = 'iPad';
-            } else if (/Android/.test(ua)) {
-                if (/Mi|Redmi|Xiaomi/i.test(ua)) {
-                    deviceName = '小米';
-                } else if (/HUAWEI|Honor|Magic/i.test(ua)) {
-                    deviceName = '华为';
-                } else if (/OPPO|Realme|OnePlus/i.test(ua)) {
-                    deviceName = 'OPPO';
-                } else if (/vivo|iQOO/i.test(ua)) {
-                    deviceName = 'vivo';
-                } else if (/Samsung/i.test(ua)) {
-                    deviceName = '三星';
-                } else if (/Pixel/i.test(ua)) {
-                    deviceName = 'Google Pixel';
-                } else {
-                    deviceName = 'Android';
+            const DEVICE_PATTERNS = [
+                { pattern: /iPhone/, name: 'iPhone' },
+                { pattern: /iPad/, name: 'iPad' },
+                { pattern: /Mi|Redmi|Xiaomi/i, name: '小米' },
+                { pattern: /HUAWEI|Honor|Magic/i, name: '华为' },
+                { pattern: /OPPO|Realme|OnePlus/i, name: 'OPPO' },
+                { pattern: /vivo|iQOO/i, name: 'vivo' },
+                { pattern: /Samsung/i, name: '三星' },
+                { pattern: /Pixel/i, name: 'Google Pixel' },
+                { pattern: /Android/, name: 'Android' },
+                { pattern: /Windows/, name: 'Windows PC' },
+                { pattern: /Macintosh/, name: 'Mac' },
+                { pattern: /Linux/, name: 'Linux PC' }
+            ];
+
+            for (const device of DEVICE_PATTERNS) {
+                if (device.pattern.test(ua)) {
+                    deviceName = device.name;
+                    break;
                 }
-            } else if (/Windows/.test(ua)) {
-                deviceName = 'Windows PC';
-            } else if (/Macintosh/.test(ua)) {
-                deviceName = 'Mac';
-            } else if (/Linux/.test(ua)) {
-                deviceName = 'Linux PC';
             }
 
             return { deviceName, deviceId };
@@ -533,17 +537,24 @@
         const deviceInfo = getDeviceInfo();
         let clientIP = '';
         let reconnectTimer = null;
+        let ws = null;
+
+        const textInput = document.getElementById('textInput');
+        const status = document.getElementById('status');
+        const historyList = document.getElementById('historyList');
+        const MAX_HISTORY = 20;
 
         function connectWebSocket() {
-            const ws = new WebSocket('ws://' + window.location.host + '/ws?type=mobile');
+            const newWs = new WebSocket('ws://' + window.location.host + '/ws?type=mobile');
+            ws = newWs;
 
-            ws.onopen = function() {
+            newWs.onopen = function() {
                 if (reconnectTimer) {
                     clearTimeout(reconnectTimer);
                     reconnectTimer = null;
                 }
                 try {
-                    ws.send(JSON.stringify({
+                    newWs.send(JSON.stringify({
                         type: 'connect',
                         data: {
                             type: 'mobile',
@@ -553,7 +564,7 @@
                         timestamp: Date.now()
                     }));
 
-                    ws.send(JSON.stringify({
+                    newWs.send(JSON.stringify({
                         type: 'preview',
                         data: {
                             text: '',
@@ -567,9 +578,9 @@
                 } catch (e) {}
             };
 
-            ws.onerror = function(error) {};
+            newWs.onerror = function(error) {};
 
-            ws.onclose = function(event) {
+            newWs.onclose = function(event) {
                 if (!reconnectTimer) {
                     reconnectTimer = setTimeout(() => {
                         connectWebSocket();
@@ -577,7 +588,7 @@
                 }
             };
 
-            ws.addEventListener('message', function(event) {
+            newWs.addEventListener('message', function(event) {
                 const msg = JSON.parse(event.data);
                 if (msg.type === 'clear') {
                     textInput.value = '';
@@ -597,33 +608,22 @@
                 }
             });
 
-            return ws;
+            return newWs;
         }
 
-        let ws = connectWebSocket();
-
-        const textInput = document.getElementById('textInput');
-        const status = document.getElementById('status');
-        const historyList = document.getElementById('historyList');
-        const MAX_HISTORY = 20;
+        ws = connectWebSocket();
 
         window.onload = function() { renderHistory(); }
 
         textInput.addEventListener("input", function() {
             const text = textInput.value;
-            if (ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({
-                    type: 'preview',
-                    data: {
-                        text: text,
-                        length: text.length,
-                        device_name: deviceInfo.deviceName,
-                        device_id: deviceInfo.deviceId,
-                        client_ip: clientIP
-                    },
-                    timestamp: Date.now()
-                }));
-            }
+            sendMessage('preview', {
+                text: text,
+                length: text.length,
+                device_name: deviceInfo.deviceName,
+                device_id: deviceInfo.deviceId,
+                client_ip: clientIP
+            });
         });
 
         function handleSend() {
@@ -652,26 +652,16 @@
                     status.innerText = "✓ 已发送";
                     status.style.color = "#34c759";
 
-                    if (typeof ws !== 'undefined' && ws.readyState === WebSocket.OPEN) {
-                        ws.send(JSON.stringify({
-                            type: 'history',
-                            data: {
-                                text: text,
-                                device_name: deviceInfo.deviceName,
-                                device_id: deviceInfo.deviceId,
-                                client_ip: clientIP
-                            },
-                            timestamp: Date.now()
-                        }));
+                    sendMessage('history', {
+                        text: text,
+                        device_name: deviceInfo.deviceName,
+                        device_id: deviceInfo.deviceId,
+                        client_ip: clientIP
+                    });
 
-                        ws.send(JSON.stringify({
-                            type: 'clear',
-                            data: {
-                                device_id: deviceInfo.deviceId
-                            },
-                            timestamp: Date.now()
-                        }));
-                    }
+                    sendMessage('clear', {
+                        device_id: deviceInfo.deviceId
+                    });
 
                     if (clearAfter) {
                         textInput.value = '';
